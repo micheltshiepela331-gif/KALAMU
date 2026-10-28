@@ -189,6 +189,8 @@ table.help td{border-bottom:1px solid var(--line);padding:6px 4px;vertical-align
  #printArea .pb::after,#printArea .cb::after{display:none}
  #printArea .cb{break-after:column;border:0}
  #printArea .cmt{background:none!important;border:0!important}
+ #printArea.brd{padding:0.6cm;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+ #printArea .pbimg{position:fixed;inset:0;width:100%;height:100%;display:block;max-width:none}
  #printArea .mf{background:none!important}
  #printArea a{color:inherit;text-decoration:none}
  #printArea h1,#printArea h2,#printArea h3{break-after:avoid}
@@ -266,7 +268,7 @@ table.help td{border-bottom:1px solid var(--line);padding:6px 4px;vertical-align
    <h2>Documents récents</h2>
    <div class="recent" id="recent"></div>
   </div>
-  <div class="hfoot">Kalamu · LushiPratique — la technologie au service de la cité · Fonctionne sans Internet une fois ouvert</div>
+  <div class="hfoot">Kalamu · LushiPratique — la technologie au service de la cité · Fonctionne sans Internet</div>
  </section>
 
  <!-- ===== Document ouvert ===== -->
@@ -302,6 +304,122 @@ table.help td{border-bottom:1px solid var(--line);padding:6px 4px;vertical-align
 <div id="wins"></div>
 <div id="toast"></div>
 <div id="printArea" class="docbody"></div>
+<!-- Pièces de l'application Android (ignorées par le navigateur, utilisées par l'usine APK) -->
+<script type="text/plain" id="apk-main">
+package com.lushipratique.kalamu;
+
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(KalamuNativePlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}
+</script>
+<script type="text/plain" id="apk-plugin">
+package com.lushipratique.kalamu;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
+import android.util.Base64;
+import android.webkit.WebView;
+import androidx.activity.result.ActivityResult;
+import androidx.core.content.FileProvider;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+
+// Kalamu : enregistrer (téléphone ou clé USB), imprimer (Wi-Fi, Bluetooth, PDF) et partager
+@CapacitorPlugin(name = "KalamuNative")
+public class KalamuNativePlugin extends Plugin {
+
+    @PluginMethod
+    public void saveFile(PluginCall call) {
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType(call.getString("mime", "application/octet-stream"));
+        i.putExtra(Intent.EXTRA_TITLE, call.getString("name", "document"));
+        startActivityForResult(call, i, "saveResult");
+    }
+
+    @ActivityCallback
+    private void saveResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) {
+            call.reject("annule");
+            return;
+        }
+        Uri uri = result.getData().getData();
+        try (OutputStream os = getContext().getContentResolver().openOutputStream(uri)) {
+            os.write(Base64.decode(call.getString("data", ""), Base64.DEFAULT));
+            os.flush();
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("erreur : " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void share(PluginCall call) {
+        try {
+            File dir = new File(getContext().getCacheDir(), "partage");
+            dir.mkdirs();
+            File f = new File(dir, call.getString("name", "document"));
+            try (FileOutputStream fo = new FileOutputStream(f)) {
+                fo.write(Base64.decode(call.getString("data", ""), Base64.DEFAULT));
+            }
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+            Intent s = new Intent(Intent.ACTION_SEND);
+            s.setType(call.getString("mime", "application/octet-stream"));
+            s.putExtra(Intent.EXTRA_STREAM, uri);
+            s.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent ch = Intent.createChooser(s, "Partager");
+            ch.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getActivity().startActivity(ch);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("erreur : " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void print(PluginCall call) {
+        final String title = call.getString("title", "Kalamu");
+        getActivity().runOnUiThread(() -> {
+            try {
+                WebView wv = getBridge().getWebView();
+                PrintManager pm = (PrintManager) getActivity().getSystemService(Context.PRINT_SERVICE);
+                PrintDocumentAdapter ad = wv.createPrintDocumentAdapter(title);
+                pm.print(title, ad, new PrintAttributes.Builder().build());
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("erreur : " + e.getMessage());
+            }
+        });
+    }
+}
+</script>
+<script type="text/plain" id="apk-splash">
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape><solid android:color="#3B2FC9"/></shape></item>
+    <item android:gravity="center" android:drawable="@mipmap/ic_launcher"/>
+</layer-list>
+</script>
+<script type="text/plain" id="apk-icon">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</script>
 <input type="file" id="fOpen" hidden accept=".kalamu,.docx,.html,.htm,.txt,.doc,.json,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
 <input type="file" id="fImg" hidden accept="image/*">
 
@@ -315,6 +433,10 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelect
 const page=$('#page');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const CM=37.7953;
+/* Version APK (Android) : le module « KalamuNative » enregistre, imprime et partage */
+const CAP=window.Capacitor, NATIVE=!!(CAP&&CAP.isNativePlatform&&CAP.isNativePlatform()&&CAP.nativePromise);
+function nat(m,o){return CAP.nativePromise('KalamuNative',m,o||{})}
+async function blobB64(bl){return b64(new Uint8Array(await bl.arrayBuffer()))}
 const SIZES={A4:['A4 (21 × 29,7 cm)',21,29.7],A5:['A5 (14,8 × 21 cm)',14.8,21],A3:['A3 (29,7 × 42 cm)',29.7,42],Letter:['Lettre US (21,6 × 27,9 cm)',21.59,27.94],Legal:['Légal US (21,6 × 35,6 cm)',21.59,35.56]};
 const TABS=[['fichier','Fichier','#e0242e'],['accueil','Accueil','#1f6fe5'],['insertion','Insertion','#13923e'],['disposition','Disposition','#f08a00'],['references','Références','#8a3fd1'],['publipostage','Publipostage','#0f9aa8'],['revision','Révision','#e2187b'],['affichage','Affichage','#1a9be0'],['dessin','Dessin','#b07a0a'],['aide','Aide','#5c6b7a']];
 const TC=Object.fromEntries(TABS.map(t=>[t[0],t[2]]));
@@ -400,10 +522,50 @@ function afterRestore(){savedRange=null; dirty=true; clearTimeout(saveTimer); sa
 function setSaveState(t){$('#saveState').textContent=t}
 
 /* ---------------- Mise en page ---------------- */
+/* ---- Bordures de page : simples, doubles, décorées (symboles) ---- */
+const BORDERS=[
+ ['solid','Trait simple','single'],['double','Double','double'],['triple','Triple','triple'],['epais','Épais et fin','thickThinSmallGap'],
+ ['dashed','Tirets','dashed'],['dotted','Pointillés','dotted'],['arrondi','Coins arrondis','single'],['vague','Vague','wave'],
+ ['zigzag','Zigzag','zigZag'],['points','Points','basicBlackDots'],['losanges','Losanges','basicWhiteDiamonds'],['carres','Carrés','basicBlackSquares'],
+ ['triangles','Triangles','triangles'],['etoiles','Étoiles','stars'],['coeurs','Cœurs','hearts'],['fleurs','Fleurs','flowersTiny'],
+ ['coins','Coins décorés','double'],['cadre','Cadre d\'honneur','thinThickThinSmallGap']
+];
+const BMAP=Object.fromEntries(BORDERS.map(b=>[b[0],b]));
+function starPts(cx,cy,R,r){let p=[]; for(let i=0;i<10;i++){const a=Math.PI/5*i-Math.PI/2,rr=i%2?r:R; p.push((cx+rr*Math.cos(a)).toFixed(1)+','+(cy+rr*Math.sin(a)).toFixed(1))} return p.join(' ')}
+function sym(k,x,y,r,c){
+ if(k==='points')return `<circle cx="${x}" cy="${y}" r="${r*.42}" fill="${c}"/>`;
+ if(k==='losanges')return `<polygon points="${x},${y-r*.55} ${x+r*.45},${y} ${x},${y+r*.55} ${x-r*.45},${y}" fill="${c}"/>`;
+ if(k==='carres')return `<rect x="${x-r*.36}" y="${y-r*.36}" width="${r*.72}" height="${r*.72}" fill="${c}"/>`;
+ if(k==='triangles')return `<polygon points="${x},${y-r*.5} ${x+r*.48},${y+r*.38} ${x-r*.48},${y+r*.38}" fill="${c}"/>`;
+ if(k==='etoiles')return `<polygon points="${starPts(x,y,r*.6,r*.25)}" fill="${c}"/>`;
+ if(k==='coeurs'){const q=r/22; return `<path transform="translate(${x-11*q} ${y-10*q}) scale(${q})" d="M11 20C4 14 0 10.5 0 6 0 2.6 2.6 0 6 0c2.2 0 3.8 1.2 5 3 1.2-1.8 2.8-3 5-3 3.4 0 6 2.6 6 6 0 4.5-4 8-11 14z" fill="${c}"/>`}
+ if(k==='fleurs'){let o=''; for(let i=0;i<5;i++){const a=Math.PI*2/5*i; o+=`<circle cx="${(x+Math.cos(a)*r*.28).toFixed(1)}" cy="${(y+Math.sin(a)*r*.28).toFixed(1)}" r="${r*.22}" fill="${c}"/>`} return o+`<circle cx="${x}" cy="${y}" r="${r*.16}" fill="#FFD23F"/>`}
+ return '';
+}
+function borderShapes(W,H,o,b,z=1){
+ const c=b.color, w=Math.max(1,+b.w||2), k=b.style, R=(x,y,ww,hh,sw,rx=0)=>`<rect x="${x}" y="${y}" width="${Math.max(0,ww)}" height="${Math.max(0,hh)}" rx="${rx}" fill="none" stroke="${c}" stroke-width="${sw}"/>`;
+ const box=(d,sw,extra='')=>R(o+d,o+d,W-2*(o+d),H-2*(o+d),sw).replace('/>',` ${extra}/>`);
+ if(k==='solid')return box(0,w);
+ if(k==='double')return box(0,w)+box(w+4,w);
+ if(k==='triple')return box(0,w)+box(w+3,w)+box(2*w+6,w);
+ if(k==='epais')return box(0,w*2.6)+box(w*2.6+3,Math.max(1,w/2));
+ if(k==='cadre')return box(0,Math.max(1,w/2))+box(w+3,w*2.4)+box(w*3.6+6,Math.max(1,w/2));
+ if(k==='dashed')return box(0,w,'stroke-dasharray="'+(w*4+6)+' '+(w*2+5)+'"');
+ if(k==='dotted')return box(0,w*1.4,'stroke-dasharray="0 '+(w*3+5)+'" stroke-linecap="round"');
+ if(k==='arrondi')return R(o,o,W-2*o,H-2*o,w,22)+R(o+w+5,o+w+5,W-2*(o+w+5),H-2*(o+w+5),Math.max(1,w/2),16);
+ if(k==='coins'){let s=box(0,Math.max(1,w/2))+box(w+4,w); const L=46; [[o,o,1,1],[W-o,o,-1,1],[o,H-o,1,-1],[W-o,H-o,-1,-1]].forEach(([x,y,sx,sy])=>{s+=`<path d="M${x} ${y+sy*L}Q${x} ${y} ${x+sx*L} ${y}" fill="none" stroke="${c}" stroke-width="${w+1}"/><circle cx="${x+sx*14}" cy="${y+sy*14}" r="${4+w}" fill="${c}"/><path d="M${x+sx*24} ${y+sy*6}q${sx*8} ${sy*10} ${sx*18} ${sy*2}M${x+sy*0+sx*6} ${y+sy*24}q${sx*10} ${sy*8} ${sx*2} ${sy*18}" fill="none" stroke="${c}" stroke-width="${Math.max(1,w/1.5)}"/>`}); return s}
+ if(k==='vague'||k==='zigzag'){const a=(3+w)*z, L=(16+w*2)*z; let d=''; const edge=(x1,y1,x2,y2)=>{const len=Math.hypot(x2-x1,y2-y1), n=Math.max(2,Math.round(len/L)), ux=(x2-x1)/len, uy=(y2-y1)/len, nx=-uy, ny=ux; let p=`M${x1.toFixed(1)} ${y1.toFixed(1)}`; for(let i=1;i<=n;i++){const t=len*i/n, tm=len*(i-.5)/n, sg=i%2?1:-1; const mx=x1+ux*tm+nx*a*sg, my=y1+uy*tm+ny*a*sg, ex=x1+ux*t, ey=y1+uy*t; p+=k==='vague'?`Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`:`L${mx.toFixed(1)} ${my.toFixed(1)}L${ex.toFixed(1)} ${ey.toFixed(1)}`} return p}; const q=o+a; d=edge(q,q,W-q,q)+edge(W-q,q,W-q,H-q)+edge(W-q,H-q,q,H-q)+edge(q,H-q,q,q); return `<path d="${d}" fill="none" stroke="${c}" stroke-width="${Math.max(1.2,w*.8)}" stroke-linejoin="round" stroke-linecap="round"/>`}
+ // bordures à symboles
+ const r=(9+w*2.2)*z, q=o+r*.6, gap=r*1.35; let out='';
+ const line=(x1,y1,x2,y2,skipFirst)=>{const len=Math.hypot(x2-x1,y2-y1), n=Math.max(1,Math.round(len/gap)); for(let i=skipFirst?1:0;i<n;i++){const t=i/n; out+=sym(k,+(x1+(x2-x1)*t).toFixed(1),+(y1+(y2-y1)*t).toFixed(1),r,c)}};
+ line(q,q,W-q,q); line(W-q,q,W-q,H-q); line(W-q,H-q,q,H-q); line(q,H-q,q,q);
+ return out;
+}
+function borderDataURL(W,H,o,b){return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${borderShapes(W,H,o,b)}</svg>`)}
 function pageSvg(g){
  let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${g.W}" height="${g.H}">`;
  if(S.wm)s+=`<text x="${g.W/2}" y="${g.H/2}" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="700" font-size="${Math.round(g.W/(Math.max(6,S.wm.length)*0.62))}" fill="#8890b0" fill-opacity="0.16" transform="rotate(-35 ${g.W/2} ${g.H/2})">${esc(S.wm)}</text>`;
- if(S.border){const b=S.border,o=22; s+=`<rect x="${o}" y="${o}" width="${g.W-2*o}" height="${g.H-2*o}" fill="none" stroke="${b.color}" stroke-width="${b.w}" ${b.style==='dashed'?'stroke-dasharray="9 6"':b.style==='dotted'?'stroke-dasharray="2 5" stroke-linecap="round"':''}/>`; if(b.style==='double')s+=`<rect x="${o+b.w+4}" y="${o+b.w+4}" width="${g.W-2*(o+b.w+4)}" height="${g.H-2*(o+b.w+4)}" fill="none" stroke="${b.color}" stroke-width="${b.w}"/>`}
+ if(S.border)s+=borderShapes(g.W,g.H,22,S.border);
  s+=`<line x1="0" y1="${g.H-1}" x2="${g.W}" y2="${g.H-1}" stroke="#9aa0c0" stroke-width="2" stroke-dasharray="7 6"/></svg>`;
  return 'data:image/svg+xml,'+encodeURIComponent(s);
 }
@@ -538,6 +700,9 @@ const TEMPLATES={
  tfc:{name:'TFC - Mémoire',k:'#8a3fd1',l:'TFC / Mémoire',d:'Chapitres + table des matières',toc:1,mini:'<i class="c"></i><i class="t"></i><i class="s"></i><i></i><i class="s"></i><i></i>',html:()=>COVERS.classique()+'<h1>Épigraphe</h1><p style="text-align:right"><i>[Une citation qui vous inspire]</i></p><h1>Dédicace</h1><p>[À …]</p><h1>Remerciements</h1><p>[Vos remerciements]</p><p class="tocspot"><br></p><div class="pb" contenteditable="false"></div><h1>Introduction générale</h1><h2>1. Problématique</h2><p>[Votre texte]</p><h2>2. Hypothèses</h2><p>[Votre texte]</p><h2>3. Méthodes et techniques</h2><p>[Votre texte]</p><h2>4. Délimitation du sujet</h2><p>[Dans le temps et dans l\'espace]</p><h2>5. Subdivision du travail</h2><p>[Votre texte]</p><h1>Chapitre I : [Considérations générales]</h1><h2>Section 1 : [Définition des concepts]</h2><p>[Votre texte]</p><h2>Section 2 : [Présentation du milieu d\'étude]</h2><p>[Votre texte]</p><h1>Chapitre II : [Titre]</h1><h2>Section 1 : [Titre]</h2><p>[Votre texte]</p><h1>Conclusion générale</h1><p>[Votre texte]</p><h1>Bibliographie</h1><p>[Vos sources]</p>'},
  lettre:{name:'Lettre',k:'#f08a00',l:'Lettre',d:'Lettre administrative',mini:'<i style="width:40%"></i><i class="r"></i><i style="width:50%"></i><i class="s"></i><i></i><i></i><i class="r"></i>',html:()=>`<p>[Votre nom complet]<br>[Votre adresse]<br>[Votre téléphone]</p><p style="text-align:right">Lubumbashi, le ${today()}</p><p>À Monsieur / Madame [Nom du destinataire]<br>[Fonction]<br>[Adresse]</p><p><b>Objet : [objet de la lettre]</b></p><p>Monsieur / Madame,</p><p style="text-align:justify">[Écrivez ici le contenu de votre lettre.]</p><p style="text-align:justify">Veuillez agréer, Monsieur / Madame, l'expression de mes sentiments distingués.</p><p style="text-align:right">[Signature]<br>[Votre nom complet]</p>`},
  cv:{name:'CV',k:'#e2187b',l:'CV',d:'Curriculum vitae',mini:'<i class="t" style="margin-left:0"></i><i class="s"></i><i></i><i class="s"></i><i></i><i></i>',html:()=>`<h1 style="color:#e2187b">[PRÉNOM NOM]</h1><p>📍 Lubumbashi · 📞 [Téléphone] · ✉️ [E-mail]</p><h2>Profil</h2><p>[Deux ou trois phrases sur vous et ce que vous cherchez.]</p><h2>Formation</h2><table class="kt ts-sans"><tbody><tr><td><b>[Année]</b></td><td>[Diplôme] — [Établissement]</td></tr><tr><td><b>[Année]</b></td><td>[Diplôme] — [Établissement]</td></tr></tbody></table><h2>Expérience</h2><table class="kt ts-sans"><tbody><tr><td><b>[Période]</b></td><td>[Poste] — [Entreprise]<br>[Tâches principales]</td></tr></tbody></table><h2>Compétences</h2><ul><li>[Compétence]</li><li>[Compétence]</li><li>Informatique : Word, Excel, Internet</li></ul><h2>Langues</h2><ul><li>Français : [niveau]</li><li>Kiswahili : [niveau]</li><li>Anglais : [niveau]</li></ul><h2>Références</h2><p>[Nom, fonction, téléphone]</p>`},
+ syllabus:{name:'Syllabus',k:'#0f9aa8',l:'Syllabus',d:'Support de cours',s:{pnum:'bc',pfmt:'nN',header:'Syllabus — [Intitulé du cours]'},mini:'<i class="c"></i><i class="t"></i><i class="c"></i><i class="s"></i><i></i><i class="s"></i><i></i>',html:()=>`<div class="cover"><p style="text-align:center"><b>[NOM DE L'UNIVERSITÉ OU DE L'INSTITUT]</b></p><p style="text-align:center">[Faculté] — [Département]</p><p><br></p><p><br></p><p style="text-align:center;font-size:30pt;color:#0f9aa8;letter-spacing:4px"><b>SYLLABUS</b></p><p style="text-align:center;font-size:20pt;color:#2b3fae"><b>[INTITULÉ DU COURS]</b></p><p><br></p><table class="kt ts-vert"><tbody><tr><th>Élément</th><th>Détail</th></tr><tr><td>Enseignant</td><td>[Titre, nom et post-nom]</td></tr><tr><td>Promotion</td><td>[Ex. : L1 Droit]</td></tr><tr><td>Volume horaire</td><td>[Ex. : 45 heures (30 h théorie, 15 h pratique)]</td></tr><tr><td>Crédits</td><td>[Ex. : 3 crédits]</td></tr><tr><td>Contact</td><td>[Téléphone ou e-mail]</td></tr></tbody></table><p><br></p><p style="text-align:center"><b>Lubumbashi — Année académique ${ay()}</b></p></div><div class="pb" contenteditable="false"></div><p class="tocspot"><br></p><div class="pb" contenteditable="false"></div><h1>Présentation du cours</h1><p style="text-align:justify">[À quoi sert ce cours et où il se place dans la formation.]</p><h1>Objectifs</h1><h2>Objectif général</h2><p>[À la fin du cours, l'étudiant sera capable de…]</p><h2>Objectifs spécifiques</h2><ul><li>[Objectif 1]</li><li>[Objectif 2]</li><li>[Objectif 3]</li></ul><h1>Méthode d'enseignement</h1><p>[Exposés, travaux dirigés, exercices, lectures…]</p><h1>Mode d'évaluation</h1><table class="kt ts-bleu"><tbody><tr><th>Épreuve</th><th>Période</th><th>Points</th></tr><tr><td>Travaux pratiques</td><td>[…]</td><td>[…]</td></tr><tr><td>Interrogation</td><td>[…]</td><td>[…]</td></tr><tr><td>Examen</td><td>[…]</td><td>[…]</td></tr></tbody></table><h1>Chapitre I : [Titre]</h1><h2>Section 1 : [Titre]</h2><p style="text-align:justify">[Contenu du cours]</p><h2>Section 2 : [Titre]</h2><p style="text-align:justify">[Contenu du cours]</p><h1>Chapitre II : [Titre]</h1><h2>Section 1 : [Titre]</h2><p style="text-align:justify">[Contenu du cours]</p><h1>Exercices</h1><ol><li>[Question]</li><li>[Question]</li></ol><h1>Bibliographie</h1><p>[Ouvrages conseillés]</p>`,toc:1},
+ livre:{name:'Livre',k:'#8b4513',l:'Livre',d:'Roman, essai, enseignement',s:{size:'A5',m:{t:2,r:1.8,b:2,l:2.2},pnum:'bc'},mini:'<i class="t"></i><i class="c" style="width:40%"></i><i></i><i></i><i></i><i></i>',html:()=>{const P='style="text-align:justify;text-indent:1cm;font-family:Georgia,\'Times New Roman\',serif;line-height:1.5"'; return `<div class="cover"><p><br></p><p><br></p><p><br></p><p style="text-align:center;font-family:Georgia,serif;font-size:13pt;letter-spacing:3px">[NOM DE L'AUTEUR]</p><p><br></p><p style="text-align:center;font-family:Georgia,serif;font-size:26pt;color:#8b4513"><b>[TITRE DU LIVRE]</b></p><p style="text-align:center;font-family:Georgia,serif;font-style:italic">[Sous-titre]</p><p><br></p><p><br></p><p><br></p><p style="text-align:center;font-family:Georgia,serif">[Roman / Essai / Enseignement]</p><p><br></p><p><br></p><p style="text-align:center;font-family:Georgia,serif">Lubumbashi, ${new Date().getFullYear()}</p></div><div class="pb" contenteditable="false"></div><p><br></p><p><br></p><p style="text-align:right;font-family:Georgia,serif;font-style:italic">[Dédicace : À …]</p><div class="pb" contenteditable="false"></div><p class="tocspot"><br></p><div class="pb" contenteditable="false"></div><h1 style="text-align:center;font-family:Georgia,serif;color:#8b4513">Préface</h1><p ${P}>[Texte de la préface]</p><div class="pb" contenteditable="false"></div><h1 style="text-align:center;font-family:Georgia,serif;color:#8b4513">Chapitre 1 — [Titre]</h1><p ${P}>[Commencez ici votre premier chapitre.]</p><div class="pb" contenteditable="false"></div><h1 style="text-align:center;font-family:Georgia,serif;color:#8b4513">Chapitre 2 — [Titre]</h1><p ${P}>[Votre texte]</p><div class="pb" contenteditable="false"></div><h1 style="text-align:center;font-family:Georgia,serif;color:#8b4513">Conclusion</h1><p ${P}>[Votre texte]</p>`},toc:1},
+ certificat:{name:'Certificat',k:'#b07a0a',l:'Certificat',d:'Attestation, diplôme, honneur',s:{orient:'landscape',m:{t:2.2,r:2.2,b:2,l:2.2},border:{style:'cadre',color:'#b07a0a',w:2}},mini:'<i class="t"></i><i class="c"></i><i class="t" style="width:50%"></i><i class="c"></i>',html:()=>`<p style="text-align:center;font-size:12pt;letter-spacing:3px">[NOM DE L'ORGANISATION]</p><p><br></p><p style="text-align:center;font-family:Georgia,serif;font-size:34pt;color:#b07a0a"><b>CERTIFICAT</b></p><p style="text-align:center;font-size:14pt;letter-spacing:2px">D'HONNEUR</p><p><br></p><p style="text-align:center">Ce certificat est décerné à</p><p style="text-align:center;font-family:Georgia,serif;font-size:26pt;color:#2b3fae"><i>[Nom et post-nom]</i></p><p style="text-align:center">pour [motif : participation, réussite, mérite…]</p><p><br></p><p style="text-align:center">Fait à Lubumbashi, le ${today()}</p><p><br></p><table class="kt ts-sans"><tbody><tr><td style="text-align:center">______________________<br>[Nom et fonction]</td><td style="text-align:center">______________________<br>[Nom et fonction]</td></tr></tbody></table>`},
  rapport:{name:'Rapport de stage',k:'#0f9aa8',l:'Rapport de stage',d:'Page de garde + parties',mini:'<div class="band"></div><i class="t"></i><i class="c"></i><i class="s"></i><i></i>',html:()=>COVERS.moderne()+'<h1>Introduction</h1><p>[Contexte et objectifs du stage]</p><h1>Présentation de l\'entreprise</h1><p>[Historique, activités, organisation]</p><h1>Déroulement du stage</h1><h2>Tâches réalisées</h2><ul><li>[Tâche]</li><li>[Tâche]</li></ul><h2>Compétences acquises</h2><p>[Votre texte]</p><h1>Difficultés rencontrées</h1><p>[Votre texte]</p><h1>Conclusion et recommandations</h1><p>[Votre texte]</p>'}
 };
 function tplCards(){return Object.entries(TEMPLATES).map(([k,t])=>`<button class="tpl" data-tpl="${k}" style="--k:${t.k}"><div class="mini">${t.mini}</div><b>${t.l}</b><small>${t.d}</small></button>`).join('')}
@@ -693,9 +858,9 @@ function spacingWin(){
  w.$('#ok').onclick=()=>{const bs=selBlocks(); snap(); bs.forEach(b=>{if(v)b.style.lineHeight=v; b.style.marginTop=w.$('#sb').value+'pt'; b.style.marginBottom=w.$('#sa').value+'pt'}); changed(); w.close()};
 }
 function bordersWin(){
- const w=win('Bordures du paragraphe',`${opts([{v:'none',l:'Aucune',big:'⬜'},{v:'box',l:'Encadré',big:'🔲'},{v:'bottom',l:'En bas',big:'⎽'},{v:'top',l:'En haut',big:'⎺'},{v:'left',l:'Barre à gauche',big:'▍'}])}<div class="f" style="margin-top:10px"><label>Couleur</label><div class="sws">${PAL.slice(0,16).map((c,i)=>`<button class="sw bc${i?'':' on'}" data-bc="${c}" style="background:${c}"></button>`).join('')}</div></div>`,{icon:'▦'});
+ const w=win('Bordures du paragraphe',`<div class="f" style="margin-top:10px"><label>Type de trait</label><select class="in" id="bls"><option value="solid">Trait plein</option><option value="double">Double</option><option value="dashed">Tirets</option><option value="dotted">Pointillés</option></select></div><div class="f" style="margin-top:10px"><label>Couleur</label><div class="sws">${PAL.slice(0,16).map((c,i)=>`<button class="sw bc${i?'':' on'}" data-bc="${c}" style="background:${c}"></button>`).join('')}</div></div><p class="hint" style="margin:6px 0">Choisissez le type de trait et la couleur, puis touchez la bordure voulue :</p>${opts([{v:'none',l:'Aucune',big:'⬜'},{v:'box',l:'Encadré',big:'🔲'},{v:'bottom',l:'En bas',big:'⎽'},{v:'top',l:'En haut',big:'⎺'},{v:'left',l:'Barre à gauche',big:'▍'}])}`,{icon:'▦'});
  let col='#000000'; w.$$('.bc').forEach(b=>b.onclick=()=>{w.$$('.bc').forEach(x=>x.classList.remove('on')); b.classList.add('on'); col=b.dataset.bc});
- onOpt(w,v=>{const bs=selBlocks(); snap(); bs.forEach(b=>{b.style.border=''; b.style.padding=''; const s=`1.5px solid ${col}`; if(v==='box'){b.style.border=s; b.style.padding='4px 8px'} if(v==='bottom'){b.style.borderBottom=s; b.style.paddingBottom='3px'} if(v==='top'){b.style.borderTop=s; b.style.paddingTop='3px'} if(v==='left'){b.style.borderLeft=`4px solid ${col}`; b.style.paddingLeft='8px'}}); changed(); w.close()});
+ onOpt(w,v=>{const bs=selBlocks(); snap(); bs.forEach(b=>{b.style.border=''; b.style.padding=''; const ls=w.$('#bls').value, s=`${ls==='double'?'3.5px':'1.5px'} ${ls} ${col}`; if(v==='box'){b.style.border=s; b.style.padding='4px 8px'} if(v==='bottom'){b.style.borderBottom=s; b.style.paddingBottom='3px'} if(v==='top'){b.style.borderTop=s; b.style.paddingTop='3px'} if(v==='left'){b.style.borderLeft=`4px solid ${col}`; b.style.paddingLeft='8px'}}); changed(); w.close()});
 }
 function listWin(){
  const w=win('Style de liste',`<div class="f"><label>Puces</label>${opts([{v:'ul:disc',l:'● Disque'},{v:'ul:circle',l:'○ Cercle'},{v:'ul:square',l:'■ Carré'}],'o1')}</div><div class="f"><label>Numérotation</label>${opts([{v:'ol:decimal',l:'1. 2. 3.'},{v:'ol:lower-alpha',l:'a. b. c.'},{v:'ol:upper-alpha',l:'A. B. C.'},{v:'ol:lower-roman',l:'i. ii. iii.'},{v:'ol:upper-roman',l:'I. II. III.'}],'o2')}</div>`,{icon:'☰'});
@@ -889,10 +1054,15 @@ function indentWin(){
 }
 function wmWin(){const w=win('Filigrane',`${opts(['BROUILLON','CONFIDENTIEL','COPIE','URGENT','NE PAS COPIER'].map(v=>({v,l:v,on:S.wm===v})))}<div class="f" style="margin-top:10px"><label>Texte personnalisé</label><input class="in" id="wt" value="${esc(S.wm)}" maxlength="24"></div>`,{icon:'💧',color:'#f08a00',foot:'<button class="btn red" id="wx">Supprimer</button><button class="btn" id="ok">Appliquer</button>'}); onOpt(w,v=>w.$('#wt').value=v); const set=v=>{S.wm=v; applyLayout(); changed(); w.close()}; w.$('#ok').onclick=()=>set(w.$('#wt').value.trim()); w.$('#wx').onclick=()=>set('')}
 function pageBorderWin(){
- const b=S.border||{style:'solid',color:'#2b3fae',w:2};
- const w=win('Bordures de page',`<div class="f"><label>Style</label>${opts([{v:'none',l:'Aucune'},{v:'solid',l:'Trait plein'},{v:'double',l:'Double'},{v:'dashed',l:'Tirets'},{v:'dotted',l:'Pointillés'}].map(o=>({...o,on:(S.border?S.border.style:'none')===o.v})),'bs')}</div><div class="f"><label>Couleur</label><div class="sws">${PAL.slice(0,16).map(c=>`<button class="sw bc${c===b.color?' on':''}" data-bc="${c}" style="background:${c}"></button>`).join('')}</div></div><div class="f"><label>Épaisseur : <b id="bwv">${b.w}</b></label><input type="range" id="bw" min="1" max="8" value="${b.w}"></div>`,{icon:'🔳',color:'#f08a00',foot:'<button class="btn" id="ok">Appliquer</button>'});
- let st=S.border?S.border.style:'none',col=b.color; onOpt(w,v=>st=v,'.bs'); w.$$('.bc').forEach(x=>x.onclick=()=>{w.$$('.bc').forEach(y=>y.classList.remove('on')); x.classList.add('on'); col=x.dataset.bc}); w.$('#bw').oninput=e=>w.$('#bwv').textContent=e.target.value;
- w.$('#ok').onclick=()=>{S.border=st==='none'?null:{style:st,color:col,w:+w.$('#bw').value}; applyLayout(); changed(); w.close()};
+ const b0=S.border||{style:'double',color:'#2b3fae',w:2}; let st=S.border?S.border.style:'none', col=b0.color, bw=b0.w;
+ const thumb=k=>k==='none'?'<span class="big">🚫</span>':`<svg viewBox="0 0 80 100" width="62" height="78" style="display:block;margin:0 auto 4px;background:#fff;border-radius:4px;box-shadow:0 0 0 1px #e3e5ef">${borderShapes(80,100,5,{style:k,color:col,w:1.2},.5)}</svg>`;
+ const grid=()=>[['none','Aucune']].concat(BORDERS).map(([k,l])=>`<button class="opt bst${k===st?' on':''}" data-v="${k}" style="padding:6px 4px">${thumb(k)}<small style="color:inherit;font-size:11.5px">${l}</small></button>`).join('');
+ const w=win('Bordures de page',`<p class="hint">Choisissez un cadre : il entoure chaque page, à l'écran, en PDF, à l'impression et dans Word.</p><div class="opts" id="bg" style="grid-template-columns:repeat(auto-fill,minmax(86px,1fr))">${grid()}</div><div class="frow" style="margin-top:12px"><div class="f"><label>Couleur</label><div class="sws">${PAL.filter(c=>c!=='#ffffff').map(c=>`<button class="sw bc${c===col?' on':''}" data-bc="${c}" style="background:${c}"></button>`).join('')}</div></div><div class="f" style="max-width:220px"><label>Épaisseur : <b id="bwv">${bw}</b></label><input type="range" id="bw" min="1" max="6" step="0.5" value="${bw}"></div></div>`,{icon:'🔳',color:'#f08a00',wide:true,foot:'<button class="btn" id="ok">Appliquer à toutes les pages</button>'});
+ const bind=()=>w.$$('.bst').forEach(x=>x.onclick=()=>{st=x.dataset.v; w.$$('.bst').forEach(y=>y.classList.toggle('on',y===x))});
+ bind();
+ w.$$('.bc').forEach(x=>x.onclick=()=>{w.$$('.bc').forEach(y=>y.classList.remove('on')); x.classList.add('on'); col=x.dataset.bc; w.$('#bg').innerHTML=grid(); bind()});
+ w.$('#bw').oninput=e=>{bw=+e.target.value; w.$('#bwv').textContent=bw};
+ w.$('#ok').onclick=()=>{S.border=st==='none'?null:{style:st,color:col,w:bw}; applyLayout(); changed(); w.close(); toast(st==='none'?'Bordure retirée.':'Bordure appliquée ✔')};
 }
 
 /* ---------------- Références ---------------- */
@@ -1002,6 +1172,7 @@ async function mineWin(){const docs=await dbAll(); const w=win('Mes documents',d
 function infoWin(){const t=page.innerText; const w=win('Informations',`<div class="f"><label>Nom du document</label><input class="in" id="in" value="${esc($('#docName').value)}"></div><div class="f"><label>Auteur</label><input class="in" id="ia" value="${esc(S.author)}" placeholder="Votre nom"></div><table class="help"><tr><td>Mots</td><td><b>${(t.match(/\S+/g)||[]).length}</b></td></tr><tr><td>Papier</td><td><b>${SIZES[S.size][0]} · ${S.orient==='portrait'?'Portrait':'Paysage'}</b></td></tr><tr><td>Dernier enregistrement</td><td><b>${cur&&cur.t?new Date(cur.t).toLocaleString('fr-FR'):'—'}</b></td></tr></table>`,{icon:'ℹ️',color:'#e0242e',foot:'<button class="btn" id="ok">Enregistrer</button>'}); w.$('#ok').onclick=()=>{$('#docName').value=w.$('#in').value.trim()||'Document'; S.author=w.$('#ia').value.trim(); saveDoc(false); w.close()}}
 function safeName(){return ($('#docName').value||'Document').replace(/[\\/:*?"<>|]+/g,'-').trim()||'Document'}
 async function saveFile(blob,name){
+ if(NATIVE){try{await nat('saveFile',{name,mime:blob.type||'application/octet-stream',data:await blobB64(blob)}); toast('Enregistré ✔ '+name)}catch(e){const m=String(e&&e.message||e); if(!/annul/i.test(m))toast('Erreur : '+m,4000)} return}
  if(window.showSaveFilePicker){try{const ext=name.split('.').pop(); const h=await window.showSaveFilePicker({suggestedName:name,types:[{description:'Fichier .'+ext,accept:{[blob.type||'application/octet-stream']:['.'+ext]}}]}); const wr=await h.createWritable(); await wr.write(blob); await wr.close(); toast('Enregistré ✔ '+name); return}catch(e){if(e.name==='AbortError')return}}
  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove()},5000);
  toast('Fichier enregistré dans « Téléchargements » : '+name,4000);
@@ -1023,9 +1194,11 @@ function preparePrint(){
  if(!cur)return; const pa=$('#printArea'); pa.innerHTML=cleanHTML(); pa.lang=S.lang;
  pa.style.columnCount=S.cols>1?S.cols:''; pa.style.columnGap=S.cols>1?'1.25cm':'';
  if(S.wm){const d=document.createElement('div'); d.className='pwm'; d.textContent=S.wm; d.style.fontSize=Math.min(90,Math.round(geom().w*28/Math.max(5,S.wm.length)))+'pt'; pa.prepend(d)}
- 
+ pa.classList.toggle('brd',!!S.border);
+ if(S.border){const g=geom(),a=bAdj(); const W=Math.round((g.w-a.l-a.r)*CM),H=Math.round((g.h-a.t-a.b)*CM); const im=document.createElement('img'); im.className='pbimg'; im.alt=''; im.src=borderDataURL(W,H,Math.max(2,S.border.w),S.border); pa.prepend(im)}
  updatePrintCss();
 }
+function bAdj(){const m=S.m,f=v=>S.border?Math.max(0.3,v-0.6):v; return{t:f(m.t),r:f(m.r),b:f(m.b),l:f(m.l)}}
 function cssStr(s){return '"'+String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,' ')+'"'}
 function updatePrintCss(){
  if(!S)return; const g=geom(),m=S.m; let st=$('#printCss'); if(!st){st=document.createElement('style'); st.id='printCss'; document.head.appendChild(st)}
@@ -1034,21 +1207,21 @@ function updatePrintCss(){
  if(S.header)add('top-center',cssStr(S.header)); if(S.footer)add('bottom-center',cssStr(S.footer));
  if(S.pnum!=='none')add({bc:'bottom-center',br:'bottom-right',tc:'top-center',tr:'top-right'}[S.pnum],num);
  const boxes=Object.entries(box).map(([k,v])=>`@${k}{content:${v.join(' "   ·   " ')};font:9pt Calibri,Carlito,Arial,sans-serif;color:#555}`).join('');
- const brd=S.border?`border:${S.border.w}px ${S.border.style} ${S.border.color};padding:0.45cm;`:'', mm=v=>S.border?Math.max(0.3,v-0.5):v;
- st.textContent=`@page{size:${g.w}cm ${g.h}cm;margin:${mm(m.t)}cm ${mm(m.r)}cm ${mm(m.b)}cm ${mm(m.l)}cm;${brd}${boxes}}@media print{html{background:${S.pageColor||'#fff'}!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;
+ const a=bAdj();
+ st.textContent=`@page{size:${g.w}cm ${g.h}cm;margin:${a.t}cm ${a.r}cm ${a.b}cm ${a.l}cm;${boxes}}@media print{html{background:${S.pageColor||'#fff'}!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;
 }
 window.addEventListener('beforeprint',preparePrint);
 window.addEventListener('afterprint',()=>{$('#printArea').innerHTML=''; if(cur)document.title=cur.name+' — Kalamu'});
-function doPrint(){if(!cur)return; closeAllWins(); preparePrint(); document.title=safeName(); setTimeout(()=>window.print(),120)}
+function doPrint(){if(!cur)return; closeAllWins(); preparePrint(); if(NATIVE){setTimeout(()=>nat('print',{title:safeName()}).catch(e=>toast('Impression impossible : '+(e.message||e),4000)),150); return} document.title=safeName(); setTimeout(()=>window.print(),120)}
 function pdfWin(){const w=win('Exporter en PDF',`<ol class="steps"><li>Touchez <b>Créer le PDF</b>.</li><li>En haut de l'écran d'impression, choisissez l'imprimante <b>« Enregistrer au format PDF »</b>.</li><li>Touchez le bouton rond <b>PDF ⤓</b>, puis choisissez le dossier (ou la clé USB) et le nom.</li></ol><p class="note">Les numéros de page, l'en-tête, le pied de page et le filigrane apparaissent dans le PDF.</p>`,{icon:'📕',color:'#e0242e',foot:'<button class="btn red" id="ok">📕 Créer le PDF</button>'}); w.$('#ok').onclick=doPrint}
 function printWin(){const w=win('Imprimer',`<p><b>Imprimante Wi-Fi</b></p><ol class="steps"><li>Le téléphone et l'imprimante doivent être sur le <b>même Wi-Fi</b> (ou en Wi-Fi Direct).</li><li>La première fois, installez le service d'impression de la marque (HP Print Service, Canon Print, Epson…) ou « Mopria Print Service » depuis le Play Store.</li><li>Touchez <b>Imprimer maintenant</b>, puis choisissez votre imprimante en haut.</li></ol><p><b>Imprimante Bluetooth</b></p><ol class="steps"><li>Appairez l'imprimante dans <b>Paramètres → Bluetooth</b>.</li><li>Installez l'application ou le service d'impression de cette imprimante (la plupart des imprimantes Bluetooth passent par l'application de leur marque).</li><li>Touchez <b>Imprimer maintenant</b> et choisissez-la dans la liste.</li></ol><p class="note">Astuce : si l'imprimante n'apparaît pas, faites d'abord <b>Exporter en PDF</b>, puis ouvrez le PDF avec l'application de l'imprimante.</p>`,{icon:'🖨️',color:'#e0242e',foot:'<button class="btn alt" id="pdf">📕 PDF</button><button class="btn" id="ok">🖨️ Imprimer maintenant</button>'}); w.$('#ok').onclick=doPrint; w.$('#pdf').onclick=()=>{w.close(); pdfWin()}}
 function usbWin(){
  const inDoc=!!cur;
- const w=win('Clé USB',`<p><b>1. Brancher la clé</b></p><p class="hint" style="color:inherit">Branchez la clé au téléphone avec un <b>adaptateur OTG</b> (USB → micro-USB ou USB-C). Android affiche « Clé USB connectée ». Si rien n'apparaît, activez « OTG » dans les Paramètres.</p><p><b>2. Ouvrir un document de la clé</b></p><p class="hint" style="color:inherit">Touchez <b>Ouvrir depuis la clé</b>, puis le menu <b>☰</b> en haut à gauche et choisissez votre clé USB. Formats : .docx (Word), .kalamu, .txt, .html.</p>${inDoc?`<p><b>3. Mettre ce document sur la clé</b></p><p class="hint" style="color:inherit">Choisissez un format ci-dessous. Si le téléphone propose un dossier, choisissez la clé. Sinon le fichier va dans <b>Téléchargements</b> : ouvrez l'application <b>Fichiers</b>, appuyez longuement sur le fichier → <b>Déplacer</b> → clé USB.</p>${opts([{v:'docx',l:'Word (.docx)',big:'📘'},{v:'pdf',l:'PDF',big:'📕'},{v:'kalamu',l:'Kalamu',big:'✒️'}])}`:''}<p class="note">Retirez la clé seulement après avoir touché « Éjecter » dans la notification Android, pour ne pas abîmer vos fichiers.</p>`,{icon:'🔌',color:'#e0242e',foot:'<button class="btn" id="op">📂 Ouvrir depuis la clé</button>'});
+ const w=win('Clé USB',`<p><b>1. Brancher la clé</b></p><p class="hint" style="color:inherit">Branchez la clé au téléphone avec un <b>adaptateur OTG</b> (USB → micro-USB ou USB-C). Android affiche « Clé USB connectée ». Si rien n'apparaît, activez « OTG » dans les Paramètres.</p><p><b>2. Ouvrir un document de la clé</b></p><p class="hint" style="color:inherit">Touchez <b>Ouvrir depuis la clé</b>, puis le menu <b>☰</b> en haut à gauche et choisissez votre clé USB. Formats : .docx (Word), .kalamu, .txt, .html.</p>${inDoc?`<p><b>3. Mettre ce document sur la clé</b></p><p class="hint" style="color:inherit">${NATIVE?'Choisissez un format ci-dessous. Une fenêtre d\'enregistrement s\'ouvre : touchez <b>☰</b>, choisissez votre <b>clé USB</b>, puis <b>Enregistrer</b>.':'Choisissez un format ci-dessous. Si le téléphone propose un dossier, choisissez la clé. Sinon le fichier va dans <b>Téléchargements</b> : ouvrez l\'application <b>Fichiers</b>, appuyez longuement sur le fichier → <b>Déplacer</b> → clé USB.'}</p>${opts([{v:'docx',l:'Word (.docx)',big:'📘'},{v:'pdf',l:'PDF',big:'📕'},{v:'kalamu',l:'Kalamu',big:'✒️'}])}`:''}<p class="note">Retirez la clé seulement après avoir touché « Éjecter » dans la notification Android, pour ne pas abîmer vos fichiers.</p>`,{icon:'🔌',color:'#e0242e',foot:'<button class="btn" id="op">📂 Ouvrir depuis la clé</button>'});
  w.$('#op').onclick=()=>{w.close(); $('#fOpen').click()}; if(inDoc)onOpt(w,v=>{w.close(); exportAs(v)});
 }
 async function shareWin(){const w=win('Partager',`<p class="hint">Envoyez le document par WhatsApp, e-mail, Bluetooth, Google Drive…</p>${opts([{v:'docx',l:'Word (.docx)',big:'📘'},{v:'kalamu',l:'Kalamu',big:'✒️'},{v:'txt',l:'Texte',big:'📝'},{v:'pdf',l:'PDF',big:'📕',s:'Via « Enregistrer au format PDF »'}])}`,{icon:'📤',color:'#e0242e'});
- onOpt(w,async v=>{w.close(); if(v==='pdf')return pdfWin(); const n=safeName(); try{const blob=v==='docx'?await buildDocx():v==='kalamu'?kalamuBlob():new Blob([page.innerText],{type:'text/plain'}); const file=new File([blob],n+'.'+v,{type:blob.type}); if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:n})} else {toast('Partage direct impossible ici : le fichier est enregistré, partagez-le depuis « Téléchargements ».',4000); saveFile(blob,file.name)}}catch(e){if(e.name!=='AbortError')toast('Partage annulé : '+e.message)}})}
+ onOpt(w,async v=>{w.close(); if(v==='pdf')return pdfWin(); const n=safeName(); try{const blob=v==='docx'?await buildDocx():v==='kalamu'?kalamuBlob():new Blob([page.innerText],{type:'text/plain'}); const file=new File([blob],n+'.'+v,{type:blob.type}); if(NATIVE){await nat('share',{name:file.name,mime:blob.type||'application/octet-stream',data:await blobB64(blob)}); return} if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:n})} else {toast('Partage direct impossible ici : le fichier est enregistré, partagez-le depuis « Téléchargements ».',4000); saveFile(blob,file.name)}}catch(e){if(e.name!=='AbortError')toast('Partage annulé : '+e.message)}})}
 $('#fOpen').addEventListener('change',async e=>{const f=e.target.files[0]; e.target.value=''; if(!f)return; try{await openFile(f)}catch(err){console.error(err); toast('Impossible d\'ouvrir ce fichier ('+(err.message||err)+').',4000)}});
 function sanitize(h){const d=new DOMParser().parseFromString(h,'text/html'); $$('script,style,iframe,object,embed,link,meta,form,input,button,textarea,select,noscript,base',d).forEach(e=>e.remove()); $$('*',d.body).forEach(e=>{for(const a of [...e.attributes]){if(/^on/i.test(a.name)||/^\s*(javascript|vbscript):/i.test(a.value))e.removeAttribute(a.name)} if(e.hasAttribute('contenteditable')&&!e.matches('.toc,.shape,.chart,sup.fn,.mf,.frac,.pb,.cb,.notes'))e.removeAttribute('contenteditable')}); return d.body.innerHTML}
 async function openFile(f){
@@ -1208,7 +1381,8 @@ async function buildDocx(){
  if(S.footer||bot){files.push({name:'word/footer1.xml',data:`${XH}<w:ftr ${NS}>${hfP(S.footer,bot)}</w:ftr>`}); rels.push(`<Relationship Id="rIdF1" Type="${RT}footer" Target="footer1.xml"/>`); refs+='<w:footerReference w:type="default" r:id="rIdF1"/>'; ov+='<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>'}
  media.forEach(m=>rels.push(`<Relationship Id="${m.id}" Type="${RT}image" Target="${m.target}"/>`));
  const tw=cm=>Math.round(cm*567);
- const sect=`<w:sectPr>${refs}<w:pgSz w:w="${tw(g.w)}" w:h="${tw(g.h)}"${S.orient==='landscape'?' w:orient="landscape"':''}/><w:pgMar w:top="${tw(S.m.t)}" w:right="${tw(S.m.r)}" w:bottom="${tw(S.m.b)}" w:left="${tw(S.m.l)}" w:header="567" w:footer="567" w:gutter="0"/>${S.cols>1?`<w:cols w:num="${S.cols}" w:space="709"/>`:''}</w:sectPr>`;
+ const pgBorders=()=>{if(!S.border||!BMAP[S.border.style])return ''; const v=BMAP[S.border.style][2], art=!['single','double','triple','thickThinSmallGap','thinThickThinSmallGap','dashed','dotted','wave'].includes(v), sz=art?Math.min(31,Math.round(8+S.border.w*3)):Math.min(48,Math.max(4,Math.round(S.border.w*6))), c=(S.border.color||'#000000').replace('#','').toUpperCase(); return `<w:pgBorders w:offsetFrom="page">${['top','left','bottom','right'].map(x=>`<w:${x} w:val="${v}" w:sz="${sz}" w:space="24" w:color="${c}"/>`).join('')}</w:pgBorders>`};
+ const sect=`<w:sectPr>${refs}<w:pgSz w:w="${tw(g.w)}" w:h="${tw(g.h)}"${S.orient==='landscape'?' w:orient="landscape"':''}/><w:pgMar w:top="${tw(S.m.t)}" w:right="${tw(S.m.r)}" w:bottom="${tw(S.m.b)}" w:left="${tw(S.m.l)}" w:header="567" w:footer="567" w:gutter="0"/>${pgBorders()}${S.cols>1?`<w:cols w:num="${S.cols}" w:space="709"/>`:''}</w:sectPr>`;
  const docXml=`${XH}<w:document ${NS} xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${body||'<w:p/>'}${sect}</w:body></w:document>`;
  const hst=(id,name,lv,sz,col)=>`<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="${lv}"/></w:pPr><w:rPr><w:b/><w:color w:val="${col}"/><w:sz w:val="${sz}"/></w:rPr></w:style>`;
  const styles=`${XH}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="${{fr:'fr-FR',en:'en-US',sw:'sw-KE'}[S.lang]||'fr-FR'}"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>${hst('Heading1','heading 1',0,36,'2B3FAE')}${hst('Heading2','heading 2',1,30,'2B3FAE')}${hst('Heading3','heading 3',2,26,'3D4CA8')}<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:ind w:left="567"/></w:pPr><w:rPr><w:i/><w:color w:val="555555"/></w:rPr></w:style></w:styles>`;
@@ -1224,7 +1398,7 @@ async function buildDocx(){
 function helpWin(){const w=win('Aide de Kalamu',`<p><b>Bienvenue !</b> Kalamu fonctionne comme Word, sur votre téléphone, même sans Internet.</p><ol class="steps"><li>Tournez le téléphone <b>à l'horizontale</b>.</li><li>Choisissez un <b>onglet</b> en haut (Accueil, Insertion…). Les outils apparaissent juste en dessous.</li><li>Beaucoup d'outils ouvrent une <b>fenêtre</b>. Fermez-la avec la croix <b>✕</b> en haut à droite.</li><li>Le document se ferme avec la grande croix <b>✕</b> de la barre violette. Il est enregistré automatiquement.</li><li>Touchez un <b>tableau</b>, une <b>image</b> ou un <b>commentaire</b> : un bouton vert apparaît en bas pour le modifier.</li><li>Pour remettre le travail au professeur : <b>Fichier → Exporter en PDF</b> ou <b>Enregistrer sous → Word</b>.</li></ol><p class="note">Vos documents restent sur votre téléphone. Pour ne rien perdre, enregistrez une copie Word ou Kalamu sur une clé USB ou envoyez-la-vous sur WhatsApp.</p>`,{icon:'❓',color:'#5c6b7a',foot:'<button class="btn alt" id="g">🗂️ Guide des onglets</button>'}); w.$('#g').onclick=()=>{w.close(); tabsGuide()}}
 function tabsGuide(){const D={fichier:'Nouveau, ouvrir, clé USB, enregistrer, Word, PDF, imprimer, partager.',accueil:'Police, taille, couleur, gras, paragraphes, listes, styles, rechercher et remplacer.',insertion:'Page de garde, tableaux, images, formes, graphiques, liens, en-tête, numéros de page, équations, symboles.',disposition:'Marges, orientation, taille du papier, colonnes, sauts, filigrane, bordures de page.',references:'Table des matières automatique, notes, sources, citations, bibliographie, légendes.',publipostage:'Lettres et attestations en série, étiquettes, enveloppes.',revision:'Orthographe, statistiques, lecture à voix haute, langue, commentaires, protection.',affichage:'Mode lecture, page ou web, règle, navigation, zoom, plein écran, mode sombre.',dessin:'Stylo, surligneur et gomme pour dessiner à main levée, formes et graphiques.',aide:'Aide, guide des onglets, clé USB, impression, raccourcis.'}; win('Guide des onglets',`<table class="help">${TABS.map(([k,l,c],i)=>`<tr><td style="white-space:nowrap"><span class="dot" style="background:${c}"></span><b>${i+1}. ${l}</b></td><td>${D[k]}</td></tr>`).join('')}</table>`,{icon:'🗂️',color:'#5c6b7a',wide:true})}
 function keysWin(){win('Raccourcis clavier',`<p class="hint">Avec un clavier (ordinateur ou clavier Bluetooth) :</p><table class="help">${[['Ctrl + S','Enregistrer'],['Ctrl + Z / Ctrl + Y','Annuler / Rétablir'],['Ctrl + G (ou B)','Gras'],['Ctrl + I','Italique'],['Ctrl + U','Souligné'],['Ctrl + F','Rechercher'],['Ctrl + H','Remplacer'],['Ctrl + P','Imprimer'],['Ctrl + Entrée','Saut de page'],['Échap','Fermer la fenêtre']].map(([a,b])=>`<tr><td><span class="kbd">${a}</span></td><td>${b}</td></tr>`).join('')}</table>`,{icon:'⌨️',color:'#5c6b7a'})}
-function aboutWin(){win('À propos',`<p style="text-align:center;font-size:40px;margin:4px">✒️</p><p style="text-align:center"><b style="font-size:18px">Kalamu</b><br>Version 2 · Traitement de texte des étudiants de Lubumbashi</p><p style="text-align:center">Une application <b>LushiPratique</b><br><i>La technologie au service de la cité</i></p><p class="hint" style="text-align:center">Commune Annexe, Quartier Kasapa, n° 23 — Lubumbashi</p>`,{icon:'ℹ️',color:'#5c6b7a'})}
+function aboutWin(){win('À propos',`<p style="text-align:center;font-size:40px;margin:4px">✒️</p><p style="text-align:center"><b style="font-size:18px">Kalamu</b><br>Version 2.1${NATIVE?' (Android)':''} · Traitement de texte des étudiants de Lubumbashi</p><p style="text-align:center">Une application <b>LushiPratique</b><br><i>La technologie au service de la cité</i></p><p class="hint" style="text-align:center">Commune Annexe, Quartier Kasapa, n° 23 — Lubumbashi</p>`,{icon:'ℹ️',color:'#5c6b7a'})}
 
 /* ---------------- Divers : clavier, orientation, zoom ---------------- */
 document.addEventListener('keydown',e=>{
@@ -1251,6 +1425,7 @@ page.addEventListener('paste',e=>{const it=[...(e.clipboardData?.items||[])].fin
 
 /* ---------------- Démarrage ---------------- */
 try{if(localStorage.getItem('kalamu_dark'))document.documentElement.classList.add('dark')}catch(e){}
+if(NATIVE)$('#fOpen').removeAttribute('accept');
 S=defS(); buildRibbons(); renderTabs(); renderHome();
 </script>
 </body>
