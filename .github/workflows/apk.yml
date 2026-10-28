@@ -1,0 +1,76 @@
+# Usine à APK de Kalamu (LushiPratique)
+# À chaque nouvel index.html, GitHub fabrique kalamu.apk et le met en ligne :
+# https://micheltshiepela331-gif.github.io/KALAMU/kalamu.apk
+# Il faut d'abord ajouter 2 secrets dans Settings > Secrets and variables > Actions :
+#   KEYSTORE_B64 et KS_PASS
+name: Fabriquer APK Kalamu
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['index.html']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: apk-kalamu
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prendre les fichiers du dépôt
+        uses: actions/checkout@v4
+
+      - name: Vérifier la clé de signature
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KS_PASS" ]; then
+            echo "::error::Ajoutez les secrets KEYSTORE_B64 et KS_PASS dans Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Préparer le projet Android
+        run: |
+          mkdir app && cd app
+          npm init -y
+          npm install @capacitor/core@6.2.0 @capacitor/cli@6.2.0 @capacitor/android@6.2.0
+          mkdir www
+          cp ../index.html www/index.html
+          npx cap init "Kalamu" com.lushipratique.kalamu --web-dir www
+          npx cap add android
+          # icône de Kalamu
+          base64 -d > icon.png <<'FIN'
+          iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAMAAABlApw1AAABIFBMVEVdNtfSHI9ZMNiRauJiT62M
+          co7NH4/RHZDTsFvn4fl2XtubIJu9pPGukHZxQt82LsrKIZPFs/GxCmMAAH8sH8VMFLJMPbyIL9D/
+          AADyRGf/5DA/AL8Af/9BLspgLtp6QOLfH3/eGH1SNNP+/v5oOtx2PeGQNs6vK64AAAD+0j7GIpc3
+          LMqhMLx8QuS1k/DiGHo9McefMb9pRNq+JZ790EDOHo5+Zpn7y0EAAP9+dtvi1fnWzfRcR9R/AP+A
+          PeBVVf//AP/nPG/gDX5VVap0PeJ/f/9NLNA/P79DMc2cgIPAo/JtN9X/AH9/AH91PeJ2PeKARetE
+          MMxrOtxqOdx5POiSi+HOHo7QHo1rOtxpOtxnOdu/AH+qAKpINMxDMc5/P78r/isDAAAAYHRSTlNh
+          GyX///9d3v///////xwPp/8EAv8L//8B//8EApP/Rwj//v/+/v//AP/+///+//////////z//wH/
+          ////Av8DAf//A7AC/wSt//8VAgKUzP7NKVYR/5SvlajNBAMYlAS7i5fpAAAJaUlEQVR42tWdbV/b
+          NheHRQKkUNanPT/c9zZHDqpTtywlxUvIyEYSGOEZSqEt5ft/ix3ZDrGN7ejIciyrL/r7LW/+l3Qd
+          +Xi1LcISh7PX439VCNk/OzNyHDR2fPx4Qy7OeYLhXT85JUn6ocfTPyVfco2ekp+afNCP12QMQXZ7
+          SIDet4zdkn1jDoOmDg5xcwEMu0MEgLML5nwxjOLz+xD0GFza7YsC7EH8fUOb/N463Jy7wQQAvnbY
+          7ZxmXzS/x3A9Zs7RbIAd+G+GfvldBOLGSwfYYbf7eubnBIMxu0sFgCWa3/Rj87sIF+zISQaAn77o
+          nJ8THMMenwTgsKf7eucHAntQCREEAHrsW+3zw7ChEIZxADD/ZyXIDwQn48Aa3AM4ztMyzD81+Rpc
+          Ov0ogFPplSQ/NBb2YLjjRAD22P9K4Y/XpdrX922FD/Cz3vt/wB/TI7iYEBC/gCtl8WcynviF7AI4
+          w52z8vjj3ujYJztD5x5gR9f+Ld4fd9jEa+yI20Dflswfd1y6zTUH2GX7pfLHX4JjCO4C7M6vglX5
+          442Ks+MD7JfPH74EA/fuC3ajSvn8mWylQwDYZV/K6I9XBbB/zu0apt
