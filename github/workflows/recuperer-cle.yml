@@ -1,0 +1,14 @@
+name: Recuperer cle
+on: workflow_dispatch
+jobs:
+  cle:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "$K" | tr -d ' \r\n' > cle.txt
+        env:
+          K: ${{ secrets.KEYSTORE_B64 }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cle
+          path: cle.txt
+          retention-days: 1
