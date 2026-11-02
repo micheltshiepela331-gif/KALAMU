@@ -4,11 +4,11 @@ jobs:
   cle:
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "$K" | tr -d ' \r\n' > cle.txt
+      - run: printf '%s' "$P" > mdp.txt
         env:
-          K: ${{ secrets.KEYSTORE_B64 }}
+          P: ${{ secrets.KS_PASS }}
       - uses: actions/upload-artifact@v4
         with:
-          name: cle
-          path: cle.txt
+          name: mdp
+          path: mdp.txt
           retention-days: 1
